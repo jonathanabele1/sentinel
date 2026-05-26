@@ -18,7 +18,7 @@ from packages.core.observability.tracing import configure_tracing
 
 from apps.api.config import get_settings
 from apps.api.middleware import RequestIdMiddleware
-from apps.api.routes import health, webhooks
+from apps.api.routes import admin, health, webhooks
 
 
 @asynccontextmanager
@@ -48,6 +48,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.include_router(health.router)
     app.include_router(webhooks.router)
+    app.include_router(admin.router)
     FastAPIInstrumentor.instrument_app(app)
     return app
 

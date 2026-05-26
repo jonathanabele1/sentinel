@@ -42,6 +42,8 @@ secrets/
 docs/plan.md
 docs/job_description.txt
 
+docs/
+
 # Eval reports (regenerated)
 evals/reports/*.json
 evals/reports/*.html
