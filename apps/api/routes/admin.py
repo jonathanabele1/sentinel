@@ -19,14 +19,21 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from packages.core.github.diff import GitHubDiffClient
+from packages.core.llm import LLMClient
 from packages.core.models.db import ReviewRun, StepExecution
 from packages.core.models.session import get_session
 from packages.core.observability.logging import get_logger
-from packages.core.orchestrator import Engine, StepContext, default_review_plan
+from packages.core.orchestrator import (
+    DEFAULT_PLAN_NAME,
+    Engine,
+    StepContext,
+    build_default_plan,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.deps import get_engine
+from apps.api.deps import get_engine, get_github_diff_client, get_llm_client
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 log = get_logger(__name__)
@@ -37,6 +44,8 @@ async def replay_step(
     run_id: uuid.UUID,
     engine: Annotated[Engine, Depends(get_engine)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    diff_client: Annotated[GitHubDiffClient, Depends(get_github_diff_client)],
+    llm_client: Annotated[LLMClient, Depends(get_llm_client)],
     step_name: Annotated[str, Query(alias="step", description="Step name to replay (e.g. 'noop')")],
 ) -> dict[str, Any]:
     """Re-run one step using its previously snapshotted inputs.
@@ -63,17 +72,19 @@ async def replay_step(
             detail=f"no step_execution for step '{step_name}' in run {run_id}",
         )
 
-    # Find the Step instance in the plan. Hardcoded to default_review_plan
-    # for Week 2; future plans get looked up by `run.plan_name` via a registry.
-    if run.plan_name != default_review_plan.name:
+    # Build the default plan with this request's clients. Future plans get
+    # looked up by `run.plan_name` via a registry; for now only "default" is
+    # supported for replay.
+    if run.plan_name != DEFAULT_PLAN_NAME:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"run was executed under plan '{run.plan_name}', "
-                f"but replay only supports '{default_review_plan.name}' in Week 2"
+                f"but replay only supports '{DEFAULT_PLAN_NAME}'"
             ),
         )
-    step_obj = default_review_plan.get_step(step_name)
+    plan = build_default_plan(diff_client=diff_client, llm_client=llm_client)
+    step_obj = plan.get_step(step_name)
 
     # Build a fresh context for the replay. Note: ctx.outputs is empty;
     # replay does NOT depend on prior step outputs because the snapshotted

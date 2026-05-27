@@ -1,24 +1,42 @@
 """The default review plan.
 
-Week 2: a single NoopStep. The plan exists so the webhook handler has
-something concrete to call Engine.run() with, and so the whole pipeline
-end-to-end (webhook → engine → step → snapshot → comment) is exercised.
+Week 3 shape:
+    fetch_diff → analyze_diff
 
-Week 3 adds: fetch_diff → analyze_diff before the noop.
-Week 4 adds: parallel specialist reviewers + consolidator + post_comments
-             (and the plan becomes a DAG).
+`build_default_plan(...)` is a factory because the Steps now take
+dependencies (LLM client, GitHub diff client) which can't be resolved at
+module import time. The webhook handler calls this factory each request
+to compose a fresh Plan from the shared singletons.
 
-The `name` field is what gets stored in review_runs.plan_name. If you
-change it, existing runs' plan_name will not match, which is fine; it
-just means historical runs are tagged with their plan version.
+The Plan itself is still immutable once constructed; only the construction
+is now parameterised. Adding a registry of plans (Week 4+) will live here.
+
+NoopStep is still available under packages.core.orchestrator.steps.noop
+for tests and as a reference implementation. It was removed from this
+plan once real steps replaced its scaffolding role.
 """
 
 from __future__ import annotations
 
+from packages.core.agents.diff_analyzer import AnalyzeDiffStep
+from packages.core.github.diff import GitHubDiffClient
+from packages.core.llm import LLMClient
 from packages.core.orchestrator.plan import Plan
-from packages.core.orchestrator.steps.noop import NoopStep
+from packages.core.orchestrator.steps.fetch_diff import FetchDiffStep
 
-default_review_plan = Plan(
-    name="default",
-    steps=(NoopStep(),),
-)
+DEFAULT_PLAN_NAME = "default"
+
+
+def build_default_plan(
+    *,
+    diff_client: GitHubDiffClient,
+    llm_client: LLMClient,
+) -> Plan:
+    """Construct the default review plan with the given clients."""
+    return Plan(
+        name=DEFAULT_PLAN_NAME,
+        steps=(
+            FetchDiffStep(diff_client=diff_client),
+            AnalyzeDiffStep(llm_client=llm_client),
+        ),
+    )

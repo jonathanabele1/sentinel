@@ -35,3 +35,32 @@ step_duration_seconds = Histogram(
     labelnames=("step", "status"),
     registry=registry,
 )
+
+# --- LLM client ---
+llm_requests_total = Counter(
+    "sentinel_llm_requests_total",
+    "LLM API calls, by model, agent, and outcome.",
+    labelnames=("model", "agent", "status"),
+    registry=registry,
+)
+
+llm_tokens_total = Counter(
+    "sentinel_llm_tokens_total",
+    "Tokens consumed by LLM calls.",
+    labelnames=("model", "agent", "direction"),  # direction: in | out
+    registry=registry,
+)
+
+llm_cost_cents_total = Counter(
+    "sentinel_llm_cost_cents_total",
+    "Cost of LLM calls in cents (integer; sub-cent costs accumulate).",
+    labelnames=("model", "agent"),
+    registry=registry,
+)
+
+llm_latency_seconds = Histogram(
+    "sentinel_llm_latency_seconds",
+    "LLM API call latency.",
+    labelnames=("model", "agent", "status"),
+    registry=registry,
+)

@@ -37,6 +37,9 @@ class ReviewRun(Base):
     repo_full_name: Mapped[str] = mapped_column(String(256), nullable=False)
     pr_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
     head_sha: Mapped[str] = mapped_column(String(40), nullable=False)
+    # GitHub App installation_id; needed for outbound API calls during the run.
+    # Nullable for backward compatibility with rows created before this column existed.
+    installation_id: Mapped[int | None] = mapped_column(BigInteger)
     plan_name: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     error: Mapped[str | None] = mapped_column(Text)
