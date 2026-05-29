@@ -86,6 +86,11 @@ class Step[InT: BaseModel, OutT: BaseModel](abc.ABC):
     output_model: ClassVar[type[BaseModel]]
     timeout_seconds: ClassVar[int] = 30
     retry_policy: ClassVar[RetryPolicy] = RetryPolicy()
+    # Names of upstream steps this Step depends on. Empty tuple is "no
+    # explicit dependencies" — Plan validation treats that as a linear
+    # chain (each step depends on the immediately previous one) so Week
+    # 1-3 plans keep working without changes.
+    depends_on: ClassVar[tuple[str, ...]] = ()
 
     @abc.abstractmethod
     def build_inputs(self, ctx: StepContext) -> InT:

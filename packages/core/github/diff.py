@@ -29,7 +29,7 @@ from packages.core.observability.logging import get_logger
 _log = get_logger(__name__)
 
 # Conservative cap on how many files we'll inspect per PR. Real production
-# would push back on PRs touching > 200 files; for Week 3 we just truncate
+# would push back on PRs touching > 200 files; for now we just truncate
 # and log so the agent doesn't drown in noise.
 MAX_FILES_PER_PR = 100
 
@@ -68,6 +68,14 @@ class PullRequestDiff(BaseModel):
     truncated_files: bool = Field(
         default=False,
         description="True if the files list was truncated at MAX_FILES_PER_PR.",
+    )
+    ignored_files: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Paths excluded from the diff by ignore patterns (lockfiles, "
+            "generated files, etc.). Recorded so the summary can report what "
+            "was skipped; these never reach the LLM reviewers."
+        ),
     )
 
 
@@ -123,7 +131,7 @@ class GitHubDiffClient:
         unified_diff = diff_resp.text
 
         # 3. Per-file metadata. The endpoint paginates; we cap at one page
-        #    (100 files) for Week 3 simplicity. Pagination support comes
+        #    (100 files) for simplicity. Pagination support comes
         #    when we hit a PR that legitimately exceeds 100 files.
         files_resp = await self._http.get(
             f"{GITHUB_API}/repos/{repo_full_name}/pulls/{pr_number}/files",

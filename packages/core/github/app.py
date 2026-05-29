@@ -6,7 +6,7 @@ GitHub Apps authenticate in two steps:
      single installation. Installation tokens last ~1 hour.
 
 This module exposes a `GitHubAppClient` that handles both, caches installation
-tokens until expiry, and exposes the few endpoints Week 1 needs (post issue
+tokens until expiry, and exposes the few endpoints we need (post issue
 comment on a PR, post commit-status). Bigger surface area lives in
 packages/core/github/comments.py and diff.py.
 """
@@ -103,6 +103,89 @@ class GitHubAppClient:
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
         return result
+
+    async def post_pr_review(
+        self,
+        *,
+        installation_id: int,
+        repo_full_name: str,
+        pr_number: int,
+        commit_sha: str,
+        body: str,
+        comments: list[dict[str, Any]],
+        event: str = "COMMENT",
+    ) -> dict[str, Any]:
+        """Post a PR review with inline comments in one shot.
+
+        GitHub's "reviews" endpoint lets you submit a top-level review body
+        plus an arbitrary number of inline comments in a single request.
+        That's the right primitive for Sentinel: posting findings
+        one-by-one would burn one API call per finding (and one Sentinel
+        comment per finding shows up as N notification emails to the
+        author).
+
+        `comments` is a list of dicts shaped like:
+            {"path": "src/foo.py", "line": 42, "body": "..."}
+            {"path": "src/foo.py", "start_line": 40, "line": 42, "body": "..."}
+
+        `event` is one of "COMMENT", "APPROVE", "REQUEST_CHANGES". We
+        always use COMMENT so Sentinel doesn't block merges; humans decide.
+
+        `commit_sha` must be the head SHA at the time the review is posted.
+        """
+        token = await self.installation_token(installation_id)
+        resp = await self._http.post(
+            f"{GITHUB_API}/repos/{repo_full_name}/pulls/{pr_number}/reviews",
+            headers={
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={
+                "commit_id": commit_sha,
+                "body": body,
+                "event": event,
+                "comments": comments,
+            },
+        )
+        resp.raise_for_status()
+        result: dict[str, Any] = resp.json()
+        return result
+
+    async def get_file_contents(
+        self,
+        *,
+        installation_id: int,
+        repo_full_name: str,
+        path: str,
+        ref: str | None = None,
+    ) -> str | None:
+        """Fetch a file's decoded text contents, or None if it doesn't exist.
+
+        Used to read `.sentinel.yml` from a repo's default branch. A 404 (no
+        such file) returns None rather than raising — most repos won't have
+        a config file and that's fine.
+
+        `ref` selects a branch/tag/SHA; None uses the repo's default branch.
+        """
+        token = await self.installation_token(installation_id)
+        params: dict[str, str] = {}
+        if ref is not None:
+            params["ref"] = ref
+        resp = await self._http.get(
+            f"{GITHUB_API}/repos/{repo_full_name}/contents/{path}",
+            headers={
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github.raw+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            params=params,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        # With the raw media type, the body IS the file contents.
+        return resp.text
 
     async def aclose(self) -> None:
         await self._http.aclose()

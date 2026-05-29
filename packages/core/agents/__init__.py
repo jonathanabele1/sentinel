@@ -5,6 +5,6 @@ Each agent is a thin module that defines:
   - A Step subclass that calls the LLM client (usually via
     complete_structured) to produce a typed output.
 
-Today: diff_analyzer. Weeks 4: security_reviewer, correctness_reviewer,
+Agents: diff_analyzer, security_reviewer, correctness_reviewer,
 testing_reviewer, consolidator.
 """

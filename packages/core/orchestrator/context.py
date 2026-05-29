@@ -22,16 +22,37 @@ T = TypeVar("T", bound=BaseModel)
 
 @dataclass
 class StepContext:
-    """Mutable execution context shared across all Steps in one run."""
+    """Mutable execution context for one step.
+
+    `outputs` is shared across all steps in a run (so downstream steps can
+    read upstream output). The usage accumulators (tokens_in/out, cost_cents)
+    are PER-STEP: the engine builds a fresh context per step and reads these
+    back after execute() to record on the step_executions row. Steps that
+    make LLM calls report usage via add_usage().
+    """
 
     run: ReviewRun
     session: AsyncSession
     log: BoundLogger
     outputs: dict[str, BaseModel] = field(default_factory=dict)
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_cents: int = 0
 
     @property
     def run_id(self) -> uuid.UUID:
         return self.run.id
+
+    def add_usage(self, *, tokens_in: int, tokens_out: int, cost_cents: int) -> None:
+        """Accumulate LLM usage for the current step.
+
+        Agents call this after each LLM response so the engine can persist
+        per-step token/cost on the step_executions row (and roll it up to
+        the run). A step that calls the model multiple times accumulates.
+        """
+        self.tokens_in += tokens_in
+        self.tokens_out += tokens_out
+        self.cost_cents += cost_cents
 
     def get_output(self, step_name: str, expected_type: type[T]) -> T:
         """Fetch a prior step's output, asserting its type.

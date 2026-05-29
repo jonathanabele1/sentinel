@@ -24,12 +24,8 @@ from packages.core.llm import LLMClient
 from packages.core.models.db import ReviewRun, StepExecution
 from packages.core.models.session import get_session
 from packages.core.observability.logging import get_logger
-from packages.core.orchestrator import (
-    DEFAULT_PLAN_NAME,
-    Engine,
-    StepContext,
-    build_default_plan,
-)
+from packages.core.orchestrator import Engine, StepContext
+from packages.core.orchestrator.plans import DEFAULT_PLAN_NAME, build_default_plan
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

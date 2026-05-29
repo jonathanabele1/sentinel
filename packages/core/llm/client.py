@@ -63,6 +63,11 @@ class LLMResponse:
 
     The `raw` field is the SDK's response object so structured-output helpers
     can pick the tool_use blocks out of it without us forking the SDK's typing.
+
+    `tokens_in` is fresh (non-cached) input only, mirroring the Anthropic
+    `usage.input_tokens` field. Prompt-cache reads and writes are reported
+    separately in `cache_read_tokens` / `cache_creation_tokens`. Use
+    `input_tokens_total` for the honest count of all input tokens processed.
     """
 
     text: str
@@ -72,6 +77,20 @@ class LLMResponse:
     model: str
     stop_reason: str
     raw: Message
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+
+    @property
+    def input_tokens_total(self) -> int:
+        """All input tokens the request comprised, including cached ones.
+
+        `usage.input_tokens` counts only non-cached input; cache reads and
+        writes are billed separately. Summing the three gives the true number
+        of input tokens the model processed, which is what we record on the
+        step so token totals stay honest even though the cost (computed with
+        cache discounts) is much lower.
+        """
+        return self.tokens_in + self.cache_read_tokens + self.cache_creation_tokens
 
 
 class LLMError(Exception):
@@ -111,7 +130,7 @@ class LLMClient:
         *,
         model: str,
         messages: list[dict[str, Any]],
-        system: str | None = None,
+        system: str | list[dict[str, Any]] | None = None,
         max_tokens: int = 4096,
         agent: str,
         tools: list[dict[str, Any]] | None = None,
@@ -191,9 +210,21 @@ class LLMClient:
         text_chunks = [block.text for block in message.content if block.type == "text"]
         text = "".join(text_chunks)
 
-        tokens_in = message.usage.input_tokens
-        tokens_out = message.usage.output_tokens
-        cost = cents_for(model, tokens_in, tokens_out)
+        usage = message.usage
+        tokens_in = usage.input_tokens
+        tokens_out = usage.output_tokens
+        # These fields are absent on older responses and on test mocks shaped
+        # as a bare SimpleNamespace; getattr defaults to 0, and `or 0` folds
+        # the real API's None (when caching is off) down to 0 as well.
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cost = cents_for(
+            model,
+            tokens_in,
+            tokens_out,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
+        )
 
         if not has_pricing(model):
             _log.warning(
@@ -210,6 +241,8 @@ class LLMClient:
             model=model,
             stop_reason=message.stop_reason or "",
             raw=message,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
 
     def _record_success(
@@ -228,6 +261,8 @@ class LLMClient:
 
         span.set_attribute("llm.tokens_in", response.tokens_in)
         span.set_attribute("llm.tokens_out", response.tokens_out)
+        span.set_attribute("llm.cache_read_tokens", response.cache_read_tokens)
+        span.set_attribute("llm.cache_creation_tokens", response.cache_creation_tokens)
         span.set_attribute("llm.cost_cents", response.cost_cents)
         span.set_attribute("llm.latency_seconds", latency)
         span.set_attribute("llm.stop_reason", response.stop_reason)

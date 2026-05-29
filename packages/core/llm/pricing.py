@@ -40,17 +40,43 @@ PRICING: dict[str, ModelPricing] = {
 
 UNKNOWN_PRICING = ModelPricing(0.0, 0.0)
 
+# Prompt-caching multipliers on the base input rate. A cache read is much
+# cheaper than fresh input; a cache write costs a bit more than fresh input.
+# These are the standard Anthropic ratios for the default 5-minute cache.
+CACHE_READ_MULTIPLIER = 0.1
+CACHE_WRITE_MULTIPLIER = 1.25
 
-def cents_for(model: str, tokens_in: int, tokens_out: int) -> int:
+
+def cents_for(
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    *,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+) -> int:
     """Return the cost of a call in whole cents, rounded up.
+
+    `tokens_in` is fresh (non-cached) input. `cache_read_tokens` and
+    `cache_creation_tokens` are the prompt-caching portions, priced off the
+    same input rate at the multipliers above. Defaulting both to 0 keeps the
+    common (non-cached) call and existing callers unchanged.
 
     Returns 0 (with no error) for unknown models; the caller is expected to
     log a warning. We don't want a missing pricing entry to crash a review.
     """
     price = PRICING.get(model, UNKNOWN_PRICING)
     input_dollars = tokens_in / 1_000_000 * price.input_dollars_per_million
+    cache_read_dollars = (
+        cache_read_tokens / 1_000_000 * price.input_dollars_per_million * CACHE_READ_MULTIPLIER
+    )
+    cache_write_dollars = (
+        cache_creation_tokens / 1_000_000 * price.input_dollars_per_million * CACHE_WRITE_MULTIPLIER
+    )
     output_dollars = tokens_out / 1_000_000 * price.output_dollars_per_million
-    return math.ceil((input_dollars + output_dollars) * 100)
+    return math.ceil(
+        (input_dollars + cache_read_dollars + cache_write_dollars + output_dollars) * 100
+    )
 
 
 def has_pricing(model: str) -> bool:

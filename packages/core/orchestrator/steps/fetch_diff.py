@@ -6,7 +6,7 @@ PullRequestDiff which the engine snapshots to step_executions.outputs as JSONB.
 
 The unified diff and per-file metadata are then available to downstream
 steps via ctx.get_output("fetch_diff", PullRequestDiff). AnalyzeDiffStep
-(chunk 5) is the first consumer.
+is the first consumer.
 
 Implementation note: this step takes the GitHubDiffClient via __init__
 rather than reaching for a global. Steps that need external dependencies
@@ -20,6 +20,11 @@ from pydantic import BaseModel
 from packages.core.github.diff import GitHubDiffClient, PullRequestDiff
 from packages.core.orchestrator.context import StepContext
 from packages.core.orchestrator.step import RetryPolicy, Step
+from packages.core.policy import (
+    DEFAULT_IGNORE_PATTERNS,
+    filter_unified_diff,
+    path_is_ignored,
+)
 
 
 class FetchDiffInputs(BaseModel):
@@ -52,14 +57,20 @@ class FetchDiffStep(Step[FetchDiffInputs, PullRequestDiff]):
         jitter_seconds=0.5,
     )
 
-    def __init__(self, *, diff_client: GitHubDiffClient) -> None:
+    def __init__(
+        self,
+        *,
+        diff_client: GitHubDiffClient,
+        ignore_patterns: list[str] | tuple[str, ...] = DEFAULT_IGNORE_PATTERNS,
+    ) -> None:
         self._diff_client = diff_client
+        self._ignore_patterns = tuple(ignore_patterns)
 
     def build_inputs(self, ctx: StepContext) -> FetchDiffInputs:
         if ctx.run.installation_id is None:
             raise ValueError(
                 "ReviewRun is missing installation_id; the webhook handler "
-                "must set it before running the engine for Week 3+ steps."
+                "must set it before running the engine for steps that call the GitHub API."
             )
         return FetchDiffInputs(
             repo_full_name=ctx.run.repo_full_name,
@@ -69,8 +80,29 @@ class FetchDiffStep(Step[FetchDiffInputs, PullRequestDiff]):
         )
 
     async def execute(self, inputs: FetchDiffInputs, ctx: StepContext) -> PullRequestDiff:
-        return await self._diff_client.get_pr_diff(
+        diff = await self._diff_client.get_pr_diff(
             installation_id=inputs.installation_id,
             repo_full_name=inputs.repo_full_name,
             pr_number=inputs.pr_number,
+        )
+
+        # Drop generated/lock/vendored files BEFORE the diff reaches any LLM.
+        # This is the biggest cost lever: a single uv.lock can be 100k+ chars.
+        filtered_diff, dropped = filter_unified_diff(diff.unified_diff, self._ignore_patterns)
+        kept_files = [f for f in diff.files if not path_is_ignored(f.path, self._ignore_patterns)]
+
+        if dropped:
+            ctx.log.info(
+                "fetch_diff.ignored_files",
+                count=len(dropped),
+                files=dropped,
+                bytes_removed=len(diff.unified_diff) - len(filtered_diff),
+            )
+
+        return diff.model_copy(
+            update={
+                "unified_diff": filtered_diff,
+                "files": kept_files,
+                "ignored_files": dropped,
+            }
         )

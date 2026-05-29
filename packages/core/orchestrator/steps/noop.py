@@ -7,9 +7,8 @@ The purpose isn't the work; it's to prove the orchestrator's plumbing end-to-end
   - The engine snapshots those outputs to step_executions.outputs as JSONB.
   - The replay endpoint can read the snapshotted inputs and re-execute.
 
-Week 3 replaces this with the real diff_analyzer step. The contract a Step
-satisfies is what Week 3's step will also satisfy; nothing about the engine
-will need to change.
+The real diff_analyzer step replaces this. The contract a Step satisfies is
+what that step also satisfies; nothing about the engine needs to change.
 """
 
 from __future__ import annotations

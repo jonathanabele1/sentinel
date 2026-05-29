@@ -7,53 +7,52 @@ from unittest.mock import MagicMock
 
 import pytest
 import structlog
+from packages.core.agents._utils import format_files_summary, trim_diff
 from packages.core.agents.diff_analyzer import (
     MAX_DIFF_CHARS,
     AnalyzeDiffStep,
-    DiffAnalysis,
     DiffAnalysisInputs,
-    _format_files_summary,
-    _trim_diff,
 )
 from packages.core.github.diff import ChangedFile, PullRequestDiff
 from packages.core.models.db import ReviewRun
+from packages.core.models.domain import DiffAnalysis
 from packages.core.orchestrator.context import StepContext
 
 # --- Helper tests ---
 
 
-def test_trim_diff_passes_short_diff_through() -> None:
+def testtrim_diff_passes_short_diff_through() -> None:
     diff = "diff --git a/foo b/foo\n+1 line\n"
-    trimmed, truncated = _trim_diff(diff, max_chars=1000)
+    trimmed, truncated = trim_diff(diff, max_chars=1000)
     assert trimmed == diff
     assert truncated is False
 
 
-def test_trim_diff_truncates_long_diff() -> None:
+def testtrim_diff_truncates_long_diff() -> None:
     diff = "x" * 200_000
-    trimmed, truncated = _trim_diff(diff, max_chars=1000)
+    trimmed, truncated = trim_diff(diff, max_chars=1000)
     assert truncated is True
     assert len(trimmed) <= 1000
     assert "truncated" in trimmed.lower()
 
 
-def test_trim_diff_at_exact_boundary() -> None:
+def testtrim_diff_at_exact_boundary() -> None:
     diff = "x" * 1000
-    trimmed, truncated = _trim_diff(diff, max_chars=1000)
+    trimmed, truncated = trim_diff(diff, max_chars=1000)
     assert truncated is False
     assert trimmed == diff
 
 
-def test_format_files_summary_empty_list() -> None:
-    assert _format_files_summary([]).strip() == "(none)"
+def testformat_files_summary_empty_list() -> None:
+    assert format_files_summary([]).strip() == "(none)"
 
 
-def test_format_files_summary_includes_each_file() -> None:
+def testformat_files_summary_includes_each_file() -> None:
     files = [
         ChangedFile(path="a.py", status="added", additions=10, deletions=0, changes=10),
         ChangedFile(path="b.py", status="modified", additions=3, deletions=5, changes=8),
     ]
-    out = _format_files_summary(files)
+    out = format_files_summary(files)
     assert "a.py" in out
     assert "b.py" in out
     assert "+10/-0" in out

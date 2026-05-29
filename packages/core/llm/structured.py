@@ -58,9 +58,11 @@ async def complete_structured[T: BaseModel](
     schema: type[T],
     messages: list[dict[str, Any]],
     agent: str,
-    system: str | None = None,
+    system: str | list[dict[str, Any]] | None = None,
     tool_name: str | None = None,
     tool_description: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    forced_tool_name: str | None = None,
     max_tokens: int = 4096,
     max_validation_retries: int = 2,
 ) -> tuple[T, LLMResponse]:
@@ -82,11 +84,26 @@ async def complete_structured[T: BaseModel](
         system: optional system prompt.
         tool_name: override the auto-generated tool name (snake_case of schema).
         tool_description: override the auto-generated description (schema docstring).
+        tools: explicit, fixed-order tool list to send instead of deriving one
+            from `schema`. Used to share a byte-identical (cacheable) tool block
+            across agents. When given, `forced_tool_name` is required and names
+            which tool to force; `schema` still validates that tool's output.
+        forced_tool_name: which tool to force via tool_choice when `tools` is
+            supplied. Ignored when `tools` is None (the schema's tool is forced).
         max_tokens: cap on output tokens per call.
         max_validation_retries: how many additional attempts after the first.
     """
-    tool = _schema_to_tool(schema, tool_name=tool_name, description=tool_description)
-    actual_tool_name = tool["name"]
+    if tools is None:
+        # Default path: one tool, derived from the schema, and forced.
+        single_tool = schema_to_tool(schema, tool_name=tool_name, description=tool_description)
+        request_tools = [single_tool]
+        actual_tool_name = single_tool["name"]
+    else:
+        # Shared-prefix path: caller controls the tool list and forces one.
+        if forced_tool_name is None:
+            raise ValueError("forced_tool_name is required when tools is provided")
+        request_tools = tools
+        actual_tool_name = forced_tool_name
 
     conversation = list(messages)
     last_error: ValidationError | None = None
@@ -99,7 +116,7 @@ async def complete_structured[T: BaseModel](
             system=system,
             max_tokens=max_tokens,
             agent=agent,
-            tools=[tool],
+            tools=request_tools,
             tool_choice={"type": "tool", "name": actual_tool_name},
         )
 
@@ -186,13 +203,18 @@ async def complete_structured[T: BaseModel](
 # --- Helpers ---
 
 
-def _schema_to_tool(
+def schema_to_tool(
     schema: type[BaseModel],
     *,
     tool_name: str | None = None,
     description: str | None = None,
 ) -> dict[str, Any]:
-    """Generate an Anthropic tool definition from a Pydantic class."""
+    """Generate an Anthropic tool definition from a Pydantic class.
+
+    Deterministic in its inputs: the same schema and name always render the
+    same dict, which is what lets the shared-prefix builder produce a
+    byte-identical tool block across agents.
+    """
     name = tool_name or _to_snake_case(schema.__name__)
     docstring = schema.__doc__ or f"Return a {schema.__name__} object."
     desc = description or " ".join(docstring.split())
@@ -201,6 +223,10 @@ def _schema_to_tool(
         "description": desc,
         "input_schema": schema.model_json_schema(),
     }
+
+
+# Backwards-compatible alias: some tests import the underscore-prefixed name.
+_schema_to_tool = schema_to_tool
 
 
 def _find_tool_use_block(response: LLMResponse, tool_name: str) -> ToolUseBlock | None:

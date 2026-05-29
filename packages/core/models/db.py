@@ -1,6 +1,6 @@
 """SQLAlchemy 2.0 async ORM models.
 
-The two Week 1 tables: review_runs and step_executions. They are the audit trail
+The two core tables: review_runs and step_executions. They are the audit trail
 the whole orchestrator depends on; everything else is built on top.
 """
 
@@ -12,9 +12,12 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     func,
@@ -94,4 +97,42 @@ class StepExecution(Base):
     __table_args__ = (
         Index("ix_step_executions_run_id", "run_id"),
         Index("ix_step_executions_step_name", "step_name"),
+    )
+
+
+class ReviewFinding(Base):
+    """A single issue surfaced by a specialist reviewer.
+
+    One row per finding regardless of whether it was posted as an inline
+    comment. Below-threshold findings are kept for the eval harness and the
+    feedback loop.
+    """
+
+    __tablename__ = "review_findings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("review_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reviewer: Mapped[str] = mapped_column(String(32), nullable=False)
+    file: Mapped[str] = mapped_column(String(512), nullable=False)
+    line_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    line_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    category: Mapped[str] = mapped_column(String(128), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence: Mapped[str] = mapped_column(Text, nullable=False)
+    posted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    feedback: Mapped[str | None] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_review_findings_run_id", "run_id"),
+        Index("ix_review_findings_reviewer", "reviewer"),
+        Index("ix_review_findings_severity_posted", "severity", "posted"),
     )
